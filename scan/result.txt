@@ -1,3 +1,41 @@
+Test: scan
+--------------
+Running tests:
+--------------
+
+Element Count: 1000000
+Correctness passed!
+Student Time: 0.763
+Ref Time: 3.490
+
+Element Count: 10000000
+Correctness passed!
+Student Time: 12.849
+Ref Time: 11.416
+
+Element Count: 20000000
+Correctness passed!
+Student Time: 20.669
+Ref Time: 18.147
+
+Element Count: 40000000
+Correctness passed!
+Student Time: 40.932
+Ref Time: 35.353
+
+-------------------------
+Scan Score Table:
+-------------------------
+-------------------------------------------------------------------------
+| Element Count   | Ref Time        | Student Time    | Score           |
+-------------------------------------------------------------------------
+| 1000000         | 3.490           | 0.763           | 1.25            |
+| 10000000        | 11.416          | 12.849          | 1.25            |
+| 20000000        | 18.147          | 20.669          | 1.25            |
+| 40000000        | 35.353          | 40.932          | 1.25            |
+-------------------------------------------------------------------------
+|                                   | Total score:    | 5/5             |
+-------------------------------------------------------------------------
 Test: find_repeats
 --------------
 Running tests:
@@ -5,23 +43,23 @@ Running tests:
 
 Element Count: 1000000
 Correctness passed!
-Student Time: 0.955
-Ref Time: 1.558
+Student Time: 1.158
+Ref Time: 1.492
 
 Element Count: 10000000
 Correctness passed!
-Student Time: 14.046
-Ref Time: 13.051
+Student Time: 17.635
+Ref Time: 13.543
 
 Element Count: 20000000
 Correctness passed!
-Student Time: 31.091
-Ref Time: 25.781
+Student Time: 28.343
+Ref Time: 25.270
 
 Element Count: 40000000
-Correctness failed
-Student Time: 57.774
-Ref Time: 50.401
+Correctness passed!
+Student Time: 57.330
+Ref Time: 50.214
 
 -------------------------
 Find_repeats Score Table:
@@ -29,10 +67,10 @@ Find_repeats Score Table:
 -------------------------------------------------------------------------
 | Element Count   | Ref Time        | Student Time    | Score           |
 -------------------------------------------------------------------------
-| 1000000         | 1.558           | 0.955           | 1.25            |
-| 10000000        | 13.051          | 14.046          | 1.25            |
-| 20000000        | 25.781          | 31.091          | 1.03651378212344 |
-| 40000000        | 50.401          | 57.774 (F)      | 0               |
+| 1000000         | 1.492           | 1.158           | 1.25            |
+| 10000000        | 13.543          | 17.635          | 0.959951800396938 |
+| 20000000        | 25.270          | 28.343          | 1.25            |
+| 40000000        | 50.214          | 57.330          | 1.25            |
 -------------------------------------------------------------------------
-|                                   | Total score:    | 3.53651378212344/5 |
+|                                   | Total score:    | 4.70995180039694/5 |
 -------------------------------------------------------------------------
