@@ -14,6 +14,40 @@
 
 #define THREADS_PER_BLOCK 256
 
+__global__ void
+upsweep(int* arr, int step, int N) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (((index + 1) % step) == 0 && index < N) 
+        arr[index] += arr[index - step / 2];
+}
+
+__global__ void
+downsweep(int* arr, int step, int N) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (((index + 1) % step == 0) && index < N) {
+        int pre = index - step / 2;
+        int t = arr[pre];
+        arr[pre] = arr[index];
+        arr[index] += t;
+    }
+}
+
+__global__ void
+calEqual(int* arr, int length, int* equal) {
+    int index = blockIdx.x * blockDim.x  + threadIdx.x;
+    if (index < length - 1)
+        equal[index] = (arr[index] == arr[index + 1]);
+    if (index == length - 1)
+        equal[index] = 0;
+}
+
+__global__ void
+caloutput(int* equal, int* prefix_sum_equal, int* device_output, int N) {
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (equal[index] && index < N) {
+        device_output[prefix_sum_equal[index]] = index;
+    }
+}
 
 // helper function to round an integer up to the next power of 2
 static inline int nextPow2(int n) {
@@ -54,6 +88,34 @@ void exclusive_scan(int* input, int N, int* result)
     // to CUDA kernel functions (that you must write) to implement the
     // scan.
 
+    N = nextPow2(N);
+    const int threadsPerBlock = 512;
+    const int blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+
+    // upsweep phase
+    for (int two_d = 1; two_d <= N/2; two_d*=2) {
+        int two_dplus1 = 2*two_d;
+        // parallel_for (int i = 0; i < N; i += two_dplus1) {
+        //     result[i+two_dplus1-1] += result[i+two_d-1];
+        // }
+        upsweep<<<blocks, threadsPerBlock>>>(result, two_dplus1, N);
+    }
+
+    // result[N-1] = 0; // segmentation fault !!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    int zero = 0;
+    cudaMemcpy(result + N - 1, &zero, sizeof(int), cudaMemcpyHostToDevice);
+    // printf("%d\n", N - 1);
+
+    // downsweep phase
+    for (int two_d = N/2; two_d >= 1; two_d /= 2) {
+        int two_dplus1 = 2*two_d;
+        // parallel_for (int i = 0; i < N; i += two_dplus1) {
+        //     int t = result[i+two_d-1];
+        //     result[i+two_d-1] = result[i+two_dplus1-1];
+        //     result[i+two_dplus1-1] += t;
+        // }
+        downsweep<<<blocks, threadsPerBlock>>>(result, two_dplus1, N);
+    }
 
 }
 
@@ -161,7 +223,27 @@ int find_repeats(int* device_input, int length, int* device_output) {
     // must ensure that the results of find_repeats are correct given
     // the actual array length.
 
-    return 0; 
+    int rounded_length = nextPow2(length);
+
+    const int threadsPerBlock = 512;
+    const int blocks = (rounded_length + threadsPerBlock - 1) / threadsPerBlock;
+
+    int* equal = nullptr;
+    int* prefix_sum_equal = nullptr;
+    cudaMalloc(&equal, rounded_length * sizeof(int));
+    cudaMalloc(&prefix_sum_equal, rounded_length * sizeof(int));
+
+    calEqual<<<blocks, threadsPerBlock>>>(device_input, length, equal);
+
+    cudaMemcpy(prefix_sum_equal, equal, rounded_length * sizeof(int), cudaMemcpyDeviceToDevice);
+    // exclusive_scan(equal, length, prefix_sum_equal);
+    exclusive_scan(equal, length, prefix_sum_equal);
+
+    caloutput<<<blocks, threadsPerBlock>>>(equal, prefix_sum_equal, device_output, length);
+
+    int res;
+    cudaMemcpy(&res, prefix_sum_equal + length - 1, sizeof(int), cudaMemcpyDeviceToHost);
+    return res;
 }
 
 
