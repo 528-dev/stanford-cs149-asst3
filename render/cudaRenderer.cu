@@ -14,6 +14,11 @@
 #include "sceneLoader.h"
 #include "util.h"
 
+#define BLOCKSIZE 256
+#define SCAN_BLOCK_DIM BLOCKSIZE
+#include "exclusiveScan.cu_inl"
+#include "circleBoxTest.cu_inl"
+
 ////////////////////////////////////////////////////////////////////////////////////////
 // Putting all the cuda kernels here
 ///////////////////////////////////////////////////////////////////////////////////////
@@ -31,6 +36,8 @@ struct GlobalConstants {
     int imageWidth;
     int imageHeight;
     float* imageData;
+    float invWidth;
+    float invHeight;
 };
 
 // Global variable that is in scope, but read-only, for all cuda
@@ -385,28 +392,67 @@ shadePixel(int circleIndex, float2 pixelCenter, float3 p, float4* imagePtr) {
 // ensure order of update or mutual exclusion on the output image, the
 // resulting image will be incorrect.
 __global__ void kernelRenderCircles() {
-    int index_x = blockIdx.x * blockDim.x + threadIdx.x;
-    int index_y = blockIdx.y * blockDim.y + threadIdx.y;
-    short imageWidth = cuConstRendererParams.imageWidth;
-    short imageHeight = cuConstRendererParams.imageHeight;
-    if ((short)index_x >= imageWidth) return;
-    if ((short)index_y >= imageHeight) return;
+    int pixelX = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixelY = blockIdx.y * blockDim.y + threadIdx.y;
+    
+    int local_index = threadIdx.y * blockDim.x + threadIdx.x; // [0, 255]
 
-    // for_all circles;
-    for (int i = 0; i < cuConstRendererParams.numCircles; ++ i) {
-        int i3 = i * 3;
+    int boxL = blockIdx.x * blockDim.x;
+    int boxR = min(boxL + blockDim.x, cuConstRendererParams.imageWidth);
+    int boxB = blockIdx.y * blockDim.y;
+    int boxT = min(boxB + blockDim.y, cuConstRendererParams.imageHeight);
 
-        float3 p = *(float3*)(&cuConstRendererParams.position[i3]);
+    float boxL_normal = boxL * cuConstRendererParams.invWidth;
+    float boxR_normal = boxR * cuConstRendererParams.invWidth;
+    float boxB_normal = boxB * cuConstRendererParams.invHeight;
+    float boxT_normal = boxT * cuConstRendererParams.invHeight;
 
-        float invWidth = 1.f / imageWidth;
-        float invHeight = 1.f / imageHeight;
+    __shared__ uint isCircleInbox[BLOCKSIZE];
+    __shared__ uint isCircleInboxExPrefixSum[BLOCKSIZE];
+    __shared__ uint prefixSumScratch[2 * BLOCKSIZE];
+    __shared__ uint circleInboxIdx[BLOCKSIZE];
 
-        float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (index_y * imageWidth + index_x)]);
-        float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(index_x) + 0.5f),
-                                                 invHeight * (static_cast<float>(index_y) + 0.5f));
-        shadePixel(i, pixelCenterNorm, p, imgPtr);
+    for (int i = 0; i < cuConstRendererParams.numCircles; i += BLOCKSIZE) {
+        int circle_index = i + local_index;
+        if (circle_index < cuConstRendererParams.numCircles) {
+            float3 p = *(float3*)(&cuConstRendererParams.position[circle_index * 3]);
+            isCircleInbox[local_index] = circleInBox(
+                p.x, p.y, cuConstRendererParams.radius[circle_index],
+                boxL_normal, boxR_normal, boxT_normal, boxB_normal);
+        }
+        else {
+            isCircleInbox[local_index] = 0;
+        }
+
+        __syncthreads();
+
+        sharedMemExclusiveScan(
+            local_index, isCircleInbox, isCircleInboxExPrefixSum,
+            prefixSumScratch, BLOCKSIZE);
+        if (isCircleInbox[local_index]) {
+            circleInboxIdx[isCircleInboxExPrefixSum[local_index]] = circle_index;
+        }
+
+        __syncthreads();
+
+        int circleInboxIdx_len = isCircleInboxExPrefixSum[BLOCKSIZE - 1] +
+                                 isCircleInbox[BLOCKSIZE - 1];
+
+        __syncthreads();
+
+        if (pixelX < cuConstRendererParams.imageWidth && pixelY < cuConstRendererParams.imageHeight) {
+            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelX + pixelY * cuConstRendererParams.imageWidth)]);
+            float2 pixelCenterNorm = make_float2(cuConstRendererParams.invWidth * (static_cast<float>(pixelX + 0.5f)),
+                                                 cuConstRendererParams.invHeight * (static_cast<float>(pixelY + 0.5f)));
+            for (int i = 0; i < circleInboxIdx_len; ++ i) {
+                shadePixel(circleInboxIdx[i], pixelCenterNorm,
+                *(float3*)(&cuConstRendererParams.position[3 * circleInboxIdx[i]]),
+                imgPtr);
+            } 
+        }
     }
 }
+
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -530,6 +576,8 @@ CudaRenderer::setup() {
     params.color = cudaDeviceColor;
     params.radius = cudaDeviceRadius;
     params.imageData = cudaDeviceImageData;
+    params.invWidth = 1.0 / params.imageWidth;
+    params.invHeight = 1.0 / params.imageHeight;
 
     cudaMemcpyToSymbol(cuConstRendererParams, &params, sizeof(GlobalConstants));
 
